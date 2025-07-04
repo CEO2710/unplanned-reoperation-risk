@@ -16,7 +16,7 @@ st.set_page_config(
 
 # 变量定义（数值编码映射）
 VAR_DEFINITIONS = {
-    "SEX": {0: "Female", 1: "Male"},
+    "Sex": {0: "Female", 1: "Male"},  # 修正为大写S的Sex
     "ASA scores": {0: "ASA < 3", 1: "ASA ≥ 3"},
     "tumor location": {
         1: "Off-axis AND Supracerebellar",
@@ -50,8 +50,8 @@ VAR_DEFINITIONS = {
 def load_data():
     try:
         df = pd.read_excel("data/2222222.xlsx")
-        # 检查必要列
-        required_cols = ["SEX", "Unplanned reoperation"]
+        # 检查必要列（修正为大写S的Sex）
+        required_cols = ["Sex", "Unplanned reoperation"]
         missing_cols = [col for col in required_cols if col not in df.columns]
         
         if missing_cols:
