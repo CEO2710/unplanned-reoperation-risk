@@ -14,12 +14,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# 变量定义（仅内部使用，不显示在界面）
+# 变量定义（数值编码映射）
 VAR_DEFINITIONS = {
-    "SEX": {
-        "Female": "Female",
-        "Male": "Male"
-    },
+    "SEX": {0: "Female", 1: "Male"},
     "ASA scores": {0: "ASA < 3", 1: "ASA ≥ 3"},
     "tumor location": {
         1: "Off-axis AND Supracerebellar",
@@ -33,7 +30,7 @@ VAR_DEFINITIONS = {
     "diabetes": {0: "No diabetes", 1: "Diabetes"},
     "CHF": {0: "No CHF", 1: "CHF"},
     "Functional dependencies": {0: "No", 1: "Yes"},
-    "mFI-5": {  # 严格分为四类
+    "mFI-5": {  # 严格四类
         0: "Robust (mFI = 0)",
         1: "Pre-frail (mFI = 1)",
         2: "Frail (mFI = 2)",
@@ -53,10 +50,14 @@ VAR_DEFINITIONS = {
 def load_data():
     try:
         df = pd.read_excel("data/2222222.xlsx")
-        # 确保SEX列存在
-        if 'SEX' not in df.columns:
-            st.error("Data missing 'SEX' column!")
+        # 检查必要列
+        required_cols = ["SEX", "Unplanned reoperation"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            st.error(f"Data missing required columns: {', '.join(missing_cols)}")
             st.stop()
+        
         return df
     except Exception as e:
         st.error(f"Data load failed: {e}")
@@ -65,11 +66,6 @@ def load_data():
 # 训练模型
 @st.cache_data
 def train_model(df):
-    # 确保SEX列被正确处理（如果是字符串，转换为0/1）
-    if df['SEX'].dtype == 'object':
-        df = df.copy()
-        df['SEX'] = df['SEX'].map({"Female": 0, "Male": 1})
-    
     X = df.drop("Unplanned reoperation", axis=1)
     y = df["Unplanned reoperation"]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
@@ -101,29 +97,12 @@ def main():
         cols = st.columns(3)
         input_data = {}
         
-        # 确保所有变量都在表单中
         for i, feature in enumerate(feature_names):
             with cols[i % 3]:
-                # 处理SEX变量
-                if feature == "SEX":
-                    input_data[feature] = st.selectbox(
-                        "Sex",
-                        options=["Female", "Male"],
-                        index=0  # 默认女性
-                    )
-                # 处理mFI-5（严格四类）
-                elif feature == "mFI-5":
-                    input_data[feature] = st.selectbox(
-                        "mFI-5",
-                        options=[0, 1, 2, 3],
-                        format_func=lambda x: VAR_DEFINITIONS["mFI-5"][x],
-                        index=0  # 默认健康
-                    )
-                # 其他分类变量
-                elif feature in VAR_DEFINITIONS:
+                # 分类变量使用下拉选择框（显示文本，保存数值）
+                if feature in VAR_DEFINITIONS:
                     options = list(VAR_DEFINITIONS[feature].keys())
-                    # 设置默认值
-                    default_val = int(df[feature].mean()) if df[feature].dtype != 'object' else list(options)[0]
+                    default_val = int(df[feature].mean())
                     default_idx = options.index(default_val) if default_val in options else 0
                     
                     input_data[feature] = st.selectbox(
@@ -132,23 +111,21 @@ def main():
                         index=default_idx,
                         format_func=lambda x: VAR_DEFINITIONS[feature][x]
                     )
-                # 处理可能的数值变量（如果有）
+                # 数值变量使用数字输入
                 else:
                     input_data[feature] = st.number_input(
                         feature,
                         min_value=int(df[feature].min()),
                         max_value=int(df[feature].max()),
-                        value=int(df[feature].mean())
+                        value=int(df[feature].mean()),
+                        step=1
                     )
         
         # 预测按钮
         submitted = st.form_submit_button("▶️ Predict Risk", type="primary")
         
         if submitted:
-            # 准备输入数据（确保SEX正确映射为0/1）
             input_df = pd.DataFrame([input_data])
-            if 'SEX' in input_df.columns:
-                input_df['SEX'] = input_df['SEX'].map({"Female": 0, "Male": 1})
             
             # 模型预测
             prediction = model.predict(input_df)[0]
