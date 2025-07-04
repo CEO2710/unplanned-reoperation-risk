@@ -13,14 +13,42 @@ plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 
 # 页面配置
 st.set_page_config(
-    page_title="Unplanned Reoperation Risk Prediction",
+    page_title="非计划再手术风险预测",
     page_icon="⚕️",
     layout="wide"
 )
 
-# 初始化会话状态（保存SHAP图的下载缓冲区）
-if 'shap_plot_buf' not in st.session_state:
-    st.session_state.shap_plot_buf = None
+# 变量定义映射
+VAR_DEFINITIONS = {
+    "SEX": {0: "女性", 1: "男性"},
+    "ASA scores": {0: "ASA < 3", 1: "ASA ≥ 3"},
+    "tumor location": {
+        1: "轴外且小脑上",
+        2: "轴内且小脑上",
+        3: "轴外且小脑下",
+        4: "轴内且小脑下"
+    },
+    "Benign or malignant": {0: "良性", 1: "恶性"},
+    "Admitted to NICU": {0: "未入NICU", 1: "入NICU"},
+    "Duration of surgery": {0: "≤4小时", 1: ">4小时"},
+    "diabetes": {0: "无糖尿病", 1: "有糖尿病"},
+    "CHF": {0: "无CHF", 1: "有CHF"},
+    "Functional dependencies": {0: "无功能依赖", 1: "有功能依赖"},
+    "mFI-5": {
+        0: "健康 (mFI = 0)",
+        1: "预衰弱 (mFI = 1)",
+        2: "衰弱 (mFI = 2)",
+        3: "严重衰弱 (mFI ≥ 3)",
+        4: "严重衰弱 (mFI ≥ 3)"
+    },
+    "Type of tumor": {
+        1: "脑膜瘤",
+        2: "原发性恶性脑肿瘤",
+        3: "脑转移瘤",
+        4: "听神经瘤",
+        5: "其他"
+    }
+}
 
 # 加载数据
 @st.cache_data
@@ -29,7 +57,7 @@ def load_data():
         df = pd.read_excel("data/2222222.xlsx")
         return df
     except Exception as e:
-        st.error(f"Failed to load data: {e}")
+        st.error(f"数据加载失败: {e}")
         st.stop()
 
 # 训练模型
@@ -50,125 +78,137 @@ def train_model(df):
 
 # 主应用
 def main():
-    st.title("❤️ Unplanned Reoperation Risk Prediction")
-    st.markdown("This application uses machine learning to predict the risk of unplanned reoperation based on patient characteristics.")
+    st.title("⚕️ 非计划再手术风险预测系统")
+    st.markdown("本系统基于机器学习算法，通过患者术前特征预测非计划再手术风险。")
     
     df = load_data()
     model, feature_names = train_model(df)
     
-    # 侧边栏：变量定义
-    with st.sidebar.expander("Variable Definitions", expanded=False):
-        st.markdown("### Categorical Variable Definitions")
-        st.markdown("""
-        - **SEX**: 0 = Female, 1 = Male  
-        - **ASA scores**: 0 = ASA < 3, 1 = ASA ≥ 3  
-        - **tumor location**: 1=off-axis&subcerebellar, 2=intra-axis&subcerebellar, 3=off-axis&supracerebellar, 4=intra-axis&supracerebellar  
-        - **Benign or malignant**: 0 = Benign, 1 = Malignant  
-        - **Admitted to NICU**: 0 = No NICU, 1 = Admitted to NICU  
-        - **Duration of surgery**: 0 = ≤4h, 1 = >4h  
-        - **diabetes**: 0 = No diabetes, 1 = Diabetes  
-        - **CHF**: 0 = No CHF, 1 = CHF  
-        - **Functional dependencies**: 0 = No, 1 = Yes  
-        - **mFI-5**: 0=Robust, 1=Pre-frail, 2=Frail, ≥3=Severely frail  
-        - **Type of tumor**: 1=Meningiomas, 2=Primary malignant, 3=Metastatic, 4=Acoustic neuroma, 5=Other  
-        """)
+    # 侧边栏 - 变量详细定义
+    with st.sidebar.expander("📚 变量定义", expanded=False):
+        st.markdown("### 分类变量定义")
+        for feature, values in VAR_DEFINITIONS.items():
+            st.markdown(f"**{feature}**")
+            for code, desc in values.items():
+                st.markdown(f"- `{code}` = {desc}")
+            st.markdown("")
     
-    # 用户预测表单
-    st.subheader("🔍 Patient Risk Prediction")
+    # 患者信息表单
+    st.subheader("🔍 患者风险预测")
     with st.form("prediction_form"):
+        # 使用三列布局显示输入字段
+        cols = st.columns(3)
         input_data = {}
-        for feature in feature_names:
-            min_val, max_val, mean_val = int(df[feature].min()), int(df[feature].max()), int(df[feature].mean())
-            help_text = {
-                "SEX": "0 = Female, 1 = Male",
-                "ASA scores": "0 = ASA < 3, 1 = ASA ≥ 3",
-                "tumor location": "1=off-axis&subcerebellar, 2=intra-axis&subcerebellar, 3=off-axis&supracerebellar, 4=intra-axis&supracerebellar",
-                "Benign or malignant": "0 = Benign, 1 = Malignant",
-                "Admitted to NICU": "0 = No NICU, 1 = Admitted to NICU",
-                "Duration of surgery": "0 = ≤4h, 1 = >4h",
-                "diabetes": "0 = No diabetes, 1 = Diabetes",
-                "CHF": "0 = No CHF, 1 = CHF",
-                "Functional dependencies": "0 = No, 1 = Yes",
-                "mFI-5": "0=Robust, 1=Pre-frail, 2=Frail, ≥3=Severely frail",
-                "Type of tumor": "1=Meningiomas, 2=Primary malignant, 3=Metastatic, 4=Acoustic neuroma, 5=Other"
-            }.get(feature, None)
+        
+        for i, feature in enumerate(feature_names):
+            col = cols[i % 3]  # 循环使用三列
             
-            input_data[feature] = st.slider(
-                feature,
-                min_value=min_val,
-                max_value=max_val,
-                value=mean_val,
-                step=1,
-                help=help_text
+            # 获取变量定义和默认值
+            feature_def = VAR_DEFINITIONS.get(feature, {})
+            default_val = int(df[feature].mean())
+            
+            with col:
+                # 根据变量类型选择合适的输入组件
+                if feature in VAR_DEFINITIONS:
+                    # 分类变量使用下拉选择框
+                    options = list(feature_def.keys())
+                    option_labels = [f"{code} - {feature_def[code]}" for code in options]
+                    
+                    # 查找默认值在选项中的索引
+                    default_idx = options.index(default_val) if default_val in options else 0
+                    
+                    selected_code = st.selectbox(
+                        label=feature,
+                        options=options,
+                        index=default_idx,
+                        format_func=lambda x: feature_def.get(x, str(x)),
+                        help=f"可选值: {', '.join([f'{k} ({v})' for k, v in feature_def.items()])}"
+                    )
+                    input_data[feature] = selected_code
+                else:
+                    # 连续变量使用数字输入
+                    min_val = int(df[feature].min())
+                    max_val = int(df[feature].max())
+                    
+                    input_data[feature] = st.number_input(
+                        label=feature,
+                        min_value=min_val,
+                        max_value=max_val,
+                        value=default_val,
+                        step=1
+                    )
+        
+        # 提交按钮（居中显示）
+        with st.columns(3)[1]:  # 中间列
+            submitted = st.form_submit_button(
+                "▶️ 开始预测",
+                use_container_width=True,
+                type="primary"
             )
         
-        submitted = st.form_submit_button("Predict Risk")
         if submitted:
+            # 进行预测
             input_df = pd.DataFrame([input_data])
             prediction = model.predict(input_df)[0]
             proba = model.predict_proba(input_df)[0][1]
             
             # 显示预测结果
-            st.subheader("📊 Prediction Result")
+            st.subheader("📊 预测结果")
             if prediction == 1:
-                st.error(f"Prediction: **High Risk of Unplanned Reoperation**")
-                st.warning(f"Risk Probability: {proba:.2%}")
+                st.error(f"⚠️ **预测结果：高风险**")
+                st.warning(f"非计划再手术概率: {proba:.2%}")
             else:
-                st.success(f"Prediction: **Low Risk of Unplanned Reoperation**")
-                st.info(f"Risk Probability: {proba:.2%}")
+                st.success(f"✅ **预测结果：低风险**")
+                st.info(f"非计划再手术概率: {proba:.2%}")
             
-            # 生成并保存SHAP力图（不显示，直接保存）
+            # 生成SHAP解释图
             try:
-                st.subheader("📥 Generate SHAP Force Plot for Download")
+                st.subheader("🔍 预测解释")
+                st.markdown("下面的SHAP力场图展示了各特征对预测结果的影响程度：")
                 
                 # 创建SHAP解释器
                 explainer = shap.TreeExplainer(model)
                 shap_values = explainer.shap_values(input_df)
                 
-                # 处理二分类SHAP值的索引问题
-                if isinstance(shap_values, list):
-                    class_idx = 1 if len(shap_values) > 1 else 0
-                    expected_value = explainer.expected_value[class_idx]
+                # 处理二分类SHAP值
+                if isinstance(shap_values, list) and len(shap_values) == 2:
+                    class_idx = 1  # 高风险类别
                     shap_value = shap_values[class_idx]
+                    expected_value = explainer.expected_value[class_idx]
                 else:
                     class_idx = 0
-                    expected_value = explainer.expected_value
                     shap_value = shap_values
+                    expected_value = explainer.expected_value
                 
-                # 生成SHAP力图并保存到内存
+                # 生成SHAP力场图
                 fig, ax = plt.subplots(figsize=(12, 6))
                 shap.force_plot(
                     expected_value,
-                    shap_value[0],  # 单个样本的SHAP值
+                    shap_value[0],
                     input_df.iloc[0],
                     feature_names=feature_names,
                     matplotlib=True,
                     show=False
                 )
                 plt.tight_layout()
+                st.pyplot(fig)
                 
-                # 保存图像到会话状态
+                # 保存图像用于下载
                 buf = BytesIO()
-                plt.savefig(buf, format="png", dpi=300)  # 提高DPI以获得更清晰的图像
+                plt.savefig(buf, format="png", dpi=300)
                 buf.seek(0)
-                st.session_state.shap_plot_buf = buf
                 
-                plt.close(fig)  # 关闭图形以释放内存
-                
-                st.success("SHAP force plot generated successfully! Click below to download.")
+                # 下载按钮
+                st.download_button(
+                    label="📥 下载SHAP解释图",
+                    data=buf,
+                    file_name="shap_explanation.png",
+                    mime="image/png"
+                )
                 
             except Exception as e:
-                st.error(f"Failed to generate SHAP plot: {str(e)}")
-                st.write("Please check your SHAP version or input data format.")
-    
-    # 下载按钮（放在表单外）
-    if st.session_state.shap_plot_buf is not None:
-        st.download_button(
-            label="📥 Download SHAP Force Plot (PNG)",
-            data=st.session_state.shap_plot_buf,
-            file_name="unplanned_reoperation_shap_plot.png",
-            mime="image/png"
-        )
+                st.warning(f"生成SHAP解释图失败: {e}")
+                st.markdown("可以尝试更新SHAP库: `pip install shap --upgrade`")
 
 if __name__ == "__main__":
     main()
