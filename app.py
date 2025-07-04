@@ -53,19 +53,20 @@ VAR_DEFINITIONS = {
 def load_data():
     try:
         df = pd.read_excel("data/2222222.xlsx")
-        # 处理SEX列：将原数据中的0/1映射为Female/Male（如果需要）
-        if 'SEX' in df.columns:
-            df['SEX'] = df['SEX'].map({0: "Female", 1: "Male"})
+        # 确保SEX列存在
+        if 'SEX' not in df.columns:
+            st.error("Data missing 'SEX' column!")
+            st.stop()
         return df
     except Exception as e:
         st.error(f"Data load failed: {e}")
         st.stop()
 
-# 训练模型（处理SEX变量的映射）
+# 训练模型
 @st.cache_data
 def train_model(df):
-    # 临时映射SEX回0/1用于模型训练
-    if 'SEX' in df.columns:
+    # 确保SEX列被正确处理（如果是字符串，转换为0/1）
+    if df['SEX'].dtype == 'object':
         df = df.copy()
         df['SEX'] = df['SEX'].map({"Female": 0, "Male": 1})
     
@@ -100,15 +101,15 @@ def main():
         cols = st.columns(3)
         input_data = {}
         
+        # 确保所有变量都在表单中
         for i, feature in enumerate(feature_names):
             with cols[i % 3]:
-                # 特殊处理SEX：直接显示Male/Female
+                # 处理SEX变量
                 if feature == "SEX":
-                    # 下拉框直接显示Male/Female
                     input_data[feature] = st.selectbox(
                         "Sex",
                         options=["Female", "Male"],
-                        index=0  # 默认显示Female
+                        index=0  # 默认女性
                     )
                 # 处理mFI-5（严格四类）
                 elif feature == "mFI-5":
@@ -116,22 +117,35 @@ def main():
                         "mFI-5",
                         options=[0, 1, 2, 3],
                         format_func=lambda x: VAR_DEFINITIONS["mFI-5"][x],
-                        index=0
+                        index=0  # 默认健康
                     )
                 # 其他分类变量
                 elif feature in VAR_DEFINITIONS:
                     options = list(VAR_DEFINITIONS[feature].keys())
+                    # 设置默认值
+                    default_val = int(df[feature].mean()) if df[feature].dtype != 'object' else list(options)[0]
+                    default_idx = options.index(default_val) if default_val in options else 0
+                    
                     input_data[feature] = st.selectbox(
                         feature,
                         options=options,
+                        index=default_idx,
                         format_func=lambda x: VAR_DEFINITIONS[feature][x]
+                    )
+                # 处理可能的数值变量（如果有）
+                else:
+                    input_data[feature] = st.number_input(
+                        feature,
+                        min_value=int(df[feature].min()),
+                        max_value=int(df[feature].max()),
+                        value=int(df[feature].mean())
                     )
         
         # 预测按钮
         submitted = st.form_submit_button("▶️ Predict Risk", type="primary")
         
         if submitted:
-            # 处理SEX的映射（转为模型需要的0/1）
+            # 准备输入数据（确保SEX正确映射为0/1）
             input_df = pd.DataFrame([input_data])
             if 'SEX' in input_df.columns:
                 input_df['SEX'] = input_df['SEX'].map({"Female": 0, "Male": 1})
@@ -156,7 +170,7 @@ def main():
                 
                 # 处理SHAP值
                 if isinstance(shap_values, list) and len(shap_values) == 2:
-                    shap_value = shap_values[1][0]
+                    shap_value = shap_values[1][0]  # 高风险类别
                     expected_value = explainer.expected_value[1]
                 else:
                     shap_value = shap_values[0]
