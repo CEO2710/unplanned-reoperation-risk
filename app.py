@@ -14,9 +14,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# 变量定义（英文）
+# 变量定义（仅内部使用，不显示在界面）
 VAR_DEFINITIONS = {
-    "SEX": {0: "Female", 1: "Male"},
+    "SEX": {
+        "Female": "Female",
+        "Male": "Male"
+    },
     "ASA scores": {0: "ASA < 3", 1: "ASA ≥ 3"},
     "tumor location": {
         1: "Off-axis AND Supracerebellar",
@@ -30,12 +33,11 @@ VAR_DEFINITIONS = {
     "diabetes": {0: "No diabetes", 1: "Diabetes"},
     "CHF": {0: "No CHF", 1: "CHF"},
     "Functional dependencies": {0: "No", 1: "Yes"},
-    "mFI-5": {
+    "mFI-5": {  # 严格分为四类
         0: "Robust (mFI = 0)",
         1: "Pre-frail (mFI = 1)",
         2: "Frail (mFI = 2)",
-        3: "Severely frail (mFI ≥ 3)",
-        4: "Severely frail (mFI ≥ 3)"  # 覆盖≥3的情况
+        3: "Severely frail (mFI ≥ 3)"
     },
     "Type of tumor": {
         1: "Meningiomas",
@@ -51,14 +53,22 @@ VAR_DEFINITIONS = {
 def load_data():
     try:
         df = pd.read_excel("data/2222222.xlsx")
+        # 处理SEX列：将原数据中的0/1映射为Female/Male（如果需要）
+        if 'SEX' in df.columns:
+            df['SEX'] = df['SEX'].map({0: "Female", 1: "Male"})
         return df
     except Exception as e:
         st.error(f"Data load failed: {e}")
         st.stop()
 
-# 训练模型
+# 训练模型（处理SEX变量的映射）
 @st.cache_data
 def train_model(df):
+    # 临时映射SEX回0/1用于模型训练
+    if 'SEX' in df.columns:
+        df = df.copy()
+        df['SEX'] = df['SEX'].map({"Female": 0, "Male": 1})
+    
     X = df.drop("Unplanned reoperation", axis=1)
     y = df["Unplanned reoperation"]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
@@ -74,7 +84,7 @@ def train_model(df):
 
 # 主应用
 def main():
-    # 初始化会话状态（保存SHAP图缓冲区）
+    # 初始化会话状态
     if 'shap_buf' not in st.session_state:
         st.session_state.shap_buf = None
     
@@ -84,14 +94,7 @@ def main():
     df = load_data()
     model, feature_names = train_model(df)
     
-    # 侧边栏：变量说明
-    with st.sidebar.expander("📚 Variable Definitions", expanded=False):
-        for feature, desc in VAR_DEFINITIONS.items():
-            st.markdown(f"**{feature}**")
-            for code, text in desc.items():
-                st.markdown(f"- `{code}` = {text}")
-    
-    # 预测表单
+    # 患者信息表单
     st.subheader("🔍 Patient Risk Assessment")
     with st.form("prediction_form"):
         cols = st.columns(3)
@@ -99,32 +102,41 @@ def main():
         
         for i, feature in enumerate(feature_names):
             with cols[i % 3]:
-                # 分类变量用下拉框
-                if feature in VAR_DEFINITIONS:
+                # 特殊处理SEX：直接显示Male/Female
+                if feature == "SEX":
+                    # 下拉框直接显示Male/Female
+                    input_data[feature] = st.selectbox(
+                        "Sex",
+                        options=["Female", "Male"],
+                        index=0  # 默认显示Female
+                    )
+                # 处理mFI-5（严格四类）
+                elif feature == "mFI-5":
+                    input_data[feature] = st.selectbox(
+                        "mFI-5",
+                        options=[0, 1, 2, 3],
+                        format_func=lambda x: VAR_DEFINITIONS["mFI-5"][x],
+                        index=0
+                    )
+                # 其他分类变量
+                elif feature in VAR_DEFINITIONS:
                     options = list(VAR_DEFINITIONS[feature].keys())
-                    default_val = int(df[feature].mean())
-                    default_idx = options.index(default_val) if default_val in options else 0
-                    
                     input_data[feature] = st.selectbox(
                         feature,
-                        options,
-                        index=default_idx,
+                        options=options,
                         format_func=lambda x: VAR_DEFINITIONS[feature][x]
                     )
-                else:
-                    # 连续变量用数字输入（实际无连续变量，此处兼容）
-                    input_data[feature] = st.number_input(
-                        feature,
-                        min_value=int(df[feature].min()),
-                        max_value=int(df[feature].max()),
-                        value=int(df[feature].mean()),
-                        step=1
-                    )
         
+        # 预测按钮
         submitted = st.form_submit_button("▶️ Predict Risk", type="primary")
         
         if submitted:
+            # 处理SEX的映射（转为模型需要的0/1）
             input_df = pd.DataFrame([input_data])
+            if 'SEX' in input_df.columns:
+                input_df['SEX'] = input_df['SEX'].map({"Female": 0, "Male": 1})
+            
+            # 模型预测
             prediction = model.predict(input_df)[0]
             proba = model.predict_proba(input_df)[0][1]
             
@@ -137,20 +149,20 @@ def main():
                 st.success("✅ **Low Risk of Unplanned Reoperation**")
                 st.info(f"Probability: {proba:.2%}")
             
-            # 生成SHAP图（保存到会话状态）
+            # 生成SHAP图
             try:
                 explainer = shap.TreeExplainer(model)
                 shap_values = explainer.shap_values(input_df)
                 
-                # 处理二分类SHAP值
+                # 处理SHAP值
                 if isinstance(shap_values, list) and len(shap_values) == 2:
-                    shap_value = shap_values[1][0]  # 高风险类别
+                    shap_value = shap_values[1][0]
                     expected_value = explainer.expected_value[1]
                 else:
                     shap_value = shap_values[0]
                     expected_value = explainer.expected_value
                 
-                # 绘制并保存SHAP力场图
+                # 绘制SHAP图
                 fig, ax = plt.subplots(figsize=(12, 6))
                 shap.force_plot(
                     expected_value,
@@ -162,19 +174,20 @@ def main():
                 )
                 plt.tight_layout()
                 
+                # 保存到会话状态
                 buf = BytesIO()
                 plt.savefig(buf, format="png", dpi=300)
                 buf.seek(0)
-                st.session_state.shap_buf = buf  # 保存到会话状态
-                
+                st.session_state.shap_buf = buf
                 plt.close(fig)
+                
                 st.success("SHAP plot generated! Download option below.")
                 
             except Exception as e:
                 st.error(f"SHAP plot failed: {e}")
                 st.markdown("Try `pip install shap --upgrade`")
     
-    # 表单外的下载按钮（核心修复！）
+    # 表单外的下载按钮
     if st.session_state.shap_buf is not None:
         st.download_button(
             "📥 Download SHAP Plot",
@@ -182,7 +195,7 @@ def main():
             file_name="shap_force_plot.png",
             mime="image/png"
         )
-        st.session_state.shap_buf = None  # 清空，避免重复下载
+        st.session_state.shap_buf = None  # 清空缓存
 
 if __name__ == "__main__":
     main()
